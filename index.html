@@ -16,6 +16,12 @@ body {
   overflow:hidden;
   user-select:none;
 }
+#game-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
 canvas {
   border:4px solid #f0c040;
   box-shadow:0 0 30px rgba(240,192,64,.6),0 0 80px rgba(100,60,220,.4);
@@ -24,11 +30,72 @@ canvas {
   cursor:pointer;
 }
 #tag{color:#f0c040;font:bold 12px Arial Black;letter-spacing:4px;margin-top:9px;opacity:.75;text-align:center;}
+
+/* Custom Name Entry Overlay */
+#name-entry {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none; /* Hidden by default */
+  flex-direction: column;
+  align-items: center;
+  background: rgba(10, 5, 25, 0.95);
+  padding: 30px;
+  border: 3px solid #f0c040;
+  border-radius: 8px;
+  box-shadow: 0 0 30px rgba(240,192,64,0.6);
+  z-index: 10;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+#name-entry h3 { margin-bottom: 15px; color: #f0c040; text-shadow: 0 0 10px rgba(240,192,64,0.5); }
+#name-entry input {
+  font-size: 20px;
+  padding: 10px;
+  margin-bottom: 15px;
+  text-align: center;
+  text-transform: uppercase;
+  background: #1a103c;
+  color: #fff;
+  border: 2px solid #6050b0;
+  border-radius: 4px;
+  outline: none;
+  width: 250px;
+  font-weight: bold;
+}
+#name-entry input:focus { border-color: #f0c040; box-shadow: 0 0 10px rgba(240,192,64,0.4); }
+#name-entry button {
+  padding: 12px 20px;
+  font-size: 16px;
+  background: #6050b0;
+  color: white;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  text-transform: uppercase;
+  transition: all 0.2s;
+}
+#name-entry button:hover { background: #8060ff; border-color: #f0c040; }
+#name-entry button:disabled { background: #444; color: #888; cursor: not-allowed; border-color: transparent; }
 </style>
 </head>
 <body>
-<canvas id="c" width="900" height="420"></canvas>
+
+<div id="game-container">
+  <canvas id="c" width="900" height="420"></canvas>
+  
+  <!-- On-Screen Leaderboard Entry -->
+  <div id="name-entry">
+    <h3>🏆 NEW HIGH SCORE! 🏆</h3>
+    <input type="text" id="name-input" placeholder="ENTER WIZARD NAME" maxlength="10" autocomplete="off" />
+    <button id="submit-btn" onclick="submitName()">Submit & View Leaderboard</button>
+  </div>
+</div>
+
 <div id="tag">MAGIC INTERNET MONEY · ORDINALS · RUNES · $MIM</div>
+
 <script>
 // ═══════════════════════════════════════════════════
 // SUPABASE CONFIG
@@ -58,21 +125,40 @@ async function submitScore(name, score) {
       },
       body: JSON.stringify({ player_name: name, score: score })
     });
-    fetchLeaderboard();
+    await fetchLeaderboard(); // Wait for leaderboard to refresh
   } catch (e) { console.error("Submit Error:", e); }
 }
 
 function drawLeaderboard() {
-  if (ST !== 'gameover') return;
-  X.fillStyle = 'rgba(0,0,0,0.85)';
-  X.fillRect(250, 40, 400, 340);
-  X.fillStyle = 'white';
-  X.font = 'bold 24px Arial';
+  // Centered, styled leaderboard panel
+  X.fillStyle = 'rgba(15, 8, 30, 0.95)';
+  X.fillRect(200, 40, 500, 340);
+  X.strokeStyle = '#f0c040';
+  X.lineWidth = 4;
+  X.strokeRect(200, 40, 500, 340);
+
+  X.fillStyle = '#f0c040';
+  X.font = 'bold 28px Arial Black';
   X.textAlign = 'center';
-  X.fillText("TOP 10 SCORES", 450, 80);
-  X.font = '18px Arial';
+  X.fillText("🏆 TOP 10 WIZARDS 🏆", W*.5, 85);
+
+  X.font = 'bold 18px monospace';
+  X.fillStyle = 'white';
+  
+  if (topTen.length === 0) {
+    X.fillText("LOADING DATA...", W*.5, 200);
+    return;
+  }
+
   topTen.forEach((entry, i) => {
-    X.fillText(`${i+1}. ${entry.player_name || 'Anonymous'} - ${entry.score}`, 450, 120 + (i * 32));
+    const rank = String(i+1).padStart(2, ' ');
+    const nameStr = (entry.player_name || 'ANON').substring(0, 10).padEnd(10, ' ');
+    const scoreStr = String(entry.score).padStart(5, ' ');
+    
+    X.textAlign = 'left';
+    X.fillText(`${rank}. ${nameStr}`, 240, 140 + (i * 22));
+    X.textAlign = 'right';
+    X.fillText(`${scoreStr} $MIM`, 660, 140 + (i * 22));
   });
 }
 
@@ -93,6 +179,7 @@ if(!CanvasRenderingContext2D.prototype.roundRect){
   };
 }
 
+// States: 'start', 'playing', 'gameover_input', 'gameover_leaderboard'
 let ST='start',score=0,best=0,frm=0,spd=5,oTimer=0,cTimer=0,puTimer=0,invTimer=0,multiTimer=0,duckHeld=false;
 const P={x:82, y:G-PH, vy:0, grav:.58, jp:-14.5, jumps:2, af:0, at:0, ducking:false, get grounded(){return this.y>=(G-(this.ducking?DH:PH))-1;}};
 let obs=[],coins=[],parts=[],floats=[],pups=[];
@@ -151,24 +238,92 @@ function drawWandPup(x,y){ const cx=x+18; X.strokeStyle='#8B4513';X.lineWidth=5.
 function drawBG(){ const sky=X.createLinearGradient(0,0,0,G); sky.addColorStop(0,'#04011a');sky.addColorStop(.55,'#0c0630');sky.addColorStop(1,'#190a44'); X.fillStyle=sky;X.fillRect(0,0,W,H); stars.forEach(s=>{ X.globalAlpha=.42+.58*Math.abs(Math.sin(s.t+frm*.022)); X.fillStyle='#fff';X.beginPath();X.arc(s.x,s.y,s.r,0,Math.PI*2);X.fill(); }); X.globalAlpha=1; X.fillStyle='#f0e038';X.beginPath();X.arc(805,52,36,0,Math.PI*2);X.fill(); X.fillStyle='#07031e';X.beginPath();X.arc(826,45,31,0,Math.PI*2);X.fill(); bldgs.forEach(b=>{ X.fillStyle=b.col;X.fillRect(b.x,b.y,b.w,b.h); const wh=b.h/(b.wr+1),ww=b.w/(b.wc+1); X.fillStyle='#f0c040'; for(let r=1;r<=b.wr;r++){for(let c=1;c<=b.wc;c++){ X.globalAlpha=.15+.25*Math.abs(Math.sin(frm*.04+b.x*.08+r+c)); X.fillRect(b.x+c*ww-4,b.y+r*wh-5,8,9); }} X.globalAlpha=1; X.strokeStyle='#2a1060';X.lineWidth=1;X.strokeRect(b.x,b.y,b.w,b.h); }); X.fillStyle='#0b0620';X.fillRect(0,G,W,H-G); const gg=X.createLinearGradient(0,G,0,G+22); gg.addColorStop(0,'rgba(110,85,235,.9)');gg.addColorStop(1,'rgba(60,40,160,0)'); X.fillStyle=gg;X.fillRect(0,G,W,22); const off=(frm*spd*.35)%90; X.globalAlpha=.26;X.fillStyle='#7055e0';X.font='20px monospace';X.textAlign='center';X.textBaseline='middle'; for(let i=-1;i<12;i++){ const tx=i*90-off+45; X.fillText('₿',tx,G+22);X.fillText('MIM',tx,G+50); } X.globalAlpha=1; }
 function drawHUD(){ X.font='bold 26px Arial Black';X.textAlign='left';X.textBaseline='alphabetic'; X.strokeStyle='#000';X.lineWidth=4; X.strokeText(`$MIM: ${score}`,18,44);X.fillStyle='#f0c040';X.fillText(`$MIM: ${score}`,18,44); X.textAlign='right'; X.strokeText(`BEST: ${best}`,W-18,44);X.fillText(`BEST: ${best}`,W-18,44); X.fillStyle='#6050b0';X.font='bold 13px Arial';X.textAlign='left'; X.fillText(`SPEED: ${spd.toFixed(1)}x`,18,66); X.fillStyle='#1e1040';X.fillRect(112,55,100,10); X.fillStyle='#8060ff';X.shadowColor='#8060ff';X.shadowBlur=5; X.fillRect(112,55,Math.min(100,(spd-5)/11*100),10);X.shadowBlur=0; X.textAlign='right';X.fillStyle='#665588';X.font='13px Arial';X.fillText('JUMPS:',W-72,H-10); for(let j=0;j<P.jumps;j++){ X.fillStyle='#8060ff';X.shadowColor='#8060ff';X.shadowBlur=7; X.beginPath();X.arc(W-55+j*24,H-16,8,0,Math.PI*2);X.fill();X.shadowBlur=0; } let piY=78; if(invTimer>0){ X.fillStyle='#f0f000';X.font='bold 14px Arial';X.textAlign='left'; X.strokeText(`🛡 INVINCIBLE ${Math.ceil(invTimer/60)}s`,18,piY);X.fillText(`🛡 INVINCIBLE ${Math.ceil(invTimer/60)}s`,18,piY); X.fillStyle='#222';X.fillRect(18,piY+4,150,7); X.fillStyle='#f0f000';X.fillRect(18,piY+4,150*(invTimer/300),7);piY+=24; } if(multiTimer>0){ X.fillStyle='#cc00ff';X.font='bold 14px Arial';X.textAlign='left'; X.strokeText(`₿ x5 COINS ${Math.ceil(multiTimer/60)}s`,18,piY);X.fillText(`₿ x5 COINS ${Math.ceil(multiTimer/60)}s`,18,piY); X.fillStyle='#222';X.fillRect(18,piY+4,150,7); X.fillStyle='#cc00ff';X.fillRect(18,piY+4,150*(multiTimer/300),7); } if(ST==='playing'){ X.globalAlpha=.38;X.font='bold 11px Arial';X.textAlign='center'; X.fillStyle='#8060ff';X.fillText('↑ JUMP',W*.25,H-8); X.fillStyle='#40a060';X.fillText('Z/X DUCK',W*.75,H-8); X.globalAlpha=1; } }
 
-function doJump(){ if(ST==='start'||ST==='gameover'){startGame();return;} if(P.jumps>0){ const by=P.y+(P.ducking?DH:PH); P.ducking=false; P.vy=P.jp;P.jumps--; burst(P.x+40,by,'#7050ff',7); } }
-function duckOn(){duckHeld=true;} function duckOff(){duckHeld=false;}
-document.addEventListener('keydown',e=>{ if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();doJump();} if(e.code==='ArrowDown'||e.code==='KeyZ'||e.code==='KeyX'){e.preventDefault();duckOn();} });
-document.addEventListener('keyup',e=>{ if(e.code==='ArrowDown'||e.code==='KeyZ'||e.code==='KeyX')duckOff(); });
-C.addEventListener('click',e=>{ const r=C.getBoundingClientRect(); const tx=(e.clientX-r.left)*(W/r.width); if(tx>W*.55){duckOn();setTimeout(duckOff,280);} else doJump(); });
-C.addEventListener('touchstart',e=>{ e.preventDefault(); const r=C.getBoundingClientRect(); const tx=(e.touches[0].clientX-r.left)*(W/r.width); if(tx>W*.55)duckOn();else doJump(); },{passive:false});
-C.addEventListener('touchend',e=>{e.preventDefault();duckOff();},{passive:false});
+// ═══════════════════════════════════════════════════
+// INPUT HANDLING
+// ═══════════════════════════════════════════════════
 
-function startGame(){ ST='playing';score=0;frm=0;spd=5; obs=[];coins=[];parts=[];floats=[];pups=[]; oTimer=0;cTimer=0;puTimer=0;invTimer=0;multiTimer=0;duckHeld=false; P.y=G-PH;P.vy=0;P.jumps=2;P.af=0;P.at=0;P.ducking=false; }
-function gameOver(){
-  ST='gameover';
-  if(score>best)best=score;
-  burst(P.x+40,P.y+45,'#ff3030',22);
-  setTimeout(() => {
-    const name = prompt("RUG PULLED! Enter your name for the leaderboard:");
-    if (name) submitScore(name, score);
-  }, 500);
+function doJump() {
+  if (ST === 'gameover_input') return; // Blocks jumping/restarting while naming
+  if (ST === 'start' || ST === 'gameover_leaderboard') { startGame(); return; }
+  
+  if (P.jumps > 0) { 
+    const by = P.y + (P.ducking ? DH : PH); 
+    P.ducking = false; 
+    P.vy = P.jp; 
+    P.jumps--; 
+    burst(P.x + 40, by, '#7050ff', 7); 
+  }
 }
+
+function duckOn() { duckHeld = true; } 
+function duckOff() { duckHeld = false; }
+
+document.addEventListener('keydown', e => { 
+  if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();doJump();} 
+  if(e.code==='ArrowDown'||e.code==='KeyZ'||e.code==='KeyX'){e.preventDefault();duckOn();} 
+});
+document.addEventListener('keyup', e => { 
+  if(e.code==='ArrowDown'||e.code==='KeyZ'||e.code==='KeyX')duckOff(); 
+});
+
+C.addEventListener('click', e => { 
+  if (ST === 'gameover_input') return;
+  const r = C.getBoundingClientRect(); const tx = (e.clientX - r.left) * (W / r.width); 
+  if (tx > W * .55) { duckOn(); setTimeout(duckOff, 280); } else doJump(); 
+});
+C.addEventListener('touchstart', e => { 
+  if (ST === 'gameover_input') return;
+  e.preventDefault(); const r = C.getBoundingClientRect(); const tx = (e.touches[0].clientX - r.left) * (W / r.width); 
+  if (tx > W * .55) duckOn(); else doJump(); 
+}, { passive: false });
+C.addEventListener('touchend', e => { e.preventDefault(); duckOff(); }, { passive: false });
+
+// Prevent game hotkeys from firing while typing name
+const nameInput = document.getElementById('name-input');
+nameInput.addEventListener('keydown', e => {
+  e.stopPropagation(); 
+  if (e.key === 'Enter' && !document.getElementById('submit-btn').disabled) {
+    submitName();
+  }
+});
+nameInput.addEventListener('keyup', e => e.stopPropagation());
+
+// ═══════════════════════════════════════════════════
+// GAME LOGIC
+// ═══════════════════════════════════════════════════
+
+function startGame() { 
+  ST='playing';score=0;frm=0;spd=5; obs=[];coins=[];parts=[];floats=[];pups=[]; oTimer=0;cTimer=0;puTimer=0;invTimer=0;multiTimer=0;duckHeld=false; P.y=G-PH;P.vy=0;P.jumps=2;P.af=0;P.at=0;P.ducking=false; 
+}
+
+function gameOver() {
+  ST = 'gameover_input';
+  if (score > best) best = score;
+  burst(P.x + 40, P.y + 45, '#ff3030', 22);
+  
+  // Show UI instead of prompt
+  setTimeout(() => {
+    document.getElementById('name-entry').style.display = 'flex';
+    nameInput.focus();
+  }, 800);
+}
+
+window.submitName = async function() {
+  const input = document.getElementById('name-input');
+  const btn = document.getElementById('submit-btn');
+  const name = input.value.trim().substring(0, 10) || 'ANON';
+  
+  btn.innerText = 'SAVING...';
+  btn.disabled = true;
+  
+  await submitScore(name, score);
+  
+  document.getElementById('name-entry').style.display = 'none';
+  ST = 'gameover_leaderboard';
+  input.value = '';
+  btn.innerText = 'Submit & View Leaderboard';
+  btn.disabled = false;
+};
 
 function spawnObs(){ const r=Math.random(); if(r<.42){ obs.push({type:'cs',x:W+60,y:G-72,w:40,h:72}); }else if(r<.74){ obs.push({type:'ct',x:W+60,y:G-120,w:40,h:120}); }else{ obs.push({type:'rug',x:W+80,y:188,w:140,h:66}); } }
 function spawnCoin(){ const h=Math.random()<.5?G-185:G-52; coins.push({x:W+22,y:h,r:19,bob:Math.random()*Math.PI*2}); }
@@ -203,9 +358,44 @@ function draw(){
   parts.forEach(p=>{ X.globalAlpha=p.life;X.fillStyle=p.col; X.beginPath();X.arc(p.x,p.y,p.sz,0,Math.PI*2);X.fill(); }); X.globalAlpha=1;
   floats.forEach(f=>{ X.globalAlpha=f.life;X.strokeStyle='#000';X.lineWidth=3;X.textAlign='center';X.textBaseline='alphabetic'; X.strokeText(f.txt,f.x,f.y);X.fillStyle=f.col;X.fillText(f.txt,f.x,f.y); }); X.globalAlpha=1;
   drawHUD();
-  if(ST==='start'){ X.fillStyle='rgba(3,1,16,.88)';X.fillRect(0,0,W,H); X.shadowColor='#f0c040';X.shadowBlur=28; X.font='bold 60px Arial Black';X.textAlign='center';X.textBaseline='alphabetic'; X.strokeStyle='#4a2800';X.lineWidth=6; X.strokeText('$MIM RUNNER v2',W*.5,140);X.fillStyle='#f0c040';X.fillText('$MIM RUNNER v2',W*.5,140);X.shadowBlur=0; X.font='bold 18px Arial';X.fillStyle='#90ff40';X.strokeText('MAGIC INTERNET MONEY · ORDINALS · RUNE · BITCOIN',W*.5,174);X.fillText('MAGIC INTERNET MONEY · ORDINALS · RUNE · BITCOIN',W*.5,174); if(Math.floor(frm/28)%2===0){ X.font='bold 20px Arial Black';X.fillStyle='#fff'; X.strokeText('▶  PRESS SPACE / TAP LEFT TO START  ◀',W*.5,238);X.fillText('▶  PRESS SPACE / TAP LEFT TO START  ◀',W*.5,238); } X.font='14px Arial';X.fillStyle='#8878aa';X.fillText('SPACE / ↑ = JUMP (double jump!)  ·  Z, X, ↓ = DUCK under flying rugs',W*.5,278);X.fillText('🟩 GREEN CANDLE = 5s INVINCIBLE  |  ⚡ WAND = 5x COINS 5s',W*.5,300); }
-  if(ST==='gameover'){ X.fillStyle='rgba(3,1,16,.88)';X.fillRect(0,0,W,H); X.shadowColor='#ff4040';X.shadowBlur=22; X.font='bold 60px Arial Black';X.textAlign='center';X.textBaseline='alphabetic'; X.strokeText('RUG PULLED! 💀',W*.5,145);X.fillStyle='#ff3030';X.fillText('RUG PULLED! 💀',W*.5,145);X.shadowBlur=0; X.font='bold 29px Arial';X.fillStyle='#f0c040'; X.strokeText(`$MIM EARNED: ${score}`,W*.5,196);X.fillText(`$MIM EARNED: ${score}`,W*.5,196); if(score>0&&score===best){ X.fillStyle='#90ff40';X.font='bold 21px Arial';X.fillText('✨ NEW HIGH SCORE! ✨',W*.5,234); }else{ X.fillStyle='#aaa';X.font='20px Arial';X.fillText(`Best: ${best}`,W*.5,234); } if(Math.floor(frm/28)%2===0){ X.font='bold 20px Arial Black';X.fillStyle='#fff'; X.strokeText('▶  SPACE / TAP TO TRY AGAIN  ◀',W*.5,290);X.fillText('▶  SPACE / TAP TO TRY AGAIN  ◀',W*.5,290); } X.font='italic 16px Arial';X.fillStyle='#665590';X.fillText('"The Wizard abides."  —  🧙',W*.5,334);
-    drawLeaderboard();
+  
+  if(ST==='start'){ 
+    X.fillStyle='rgba(3,1,16,.88)';X.fillRect(0,0,W,H); X.shadowColor='#f0c040';X.shadowBlur=28; 
+    X.font='bold 60px Arial Black';X.textAlign='center';X.textBaseline='alphabetic'; 
+    X.strokeStyle='#4a2800';X.lineWidth=6; 
+    X.strokeText('$MIM RUNNER v2',W*.5,140);X.fillStyle='#f0c040';X.fillText('$MIM RUNNER v2',W*.5,140);X.shadowBlur=0; 
+    X.font='bold 18px Arial';X.fillStyle='#90ff40';X.strokeText('MAGIC INTERNET MONEY · ORDINALS · RUNE · BITCOIN',W*.5,174);X.fillText('MAGIC INTERNET MONEY · ORDINALS · RUNE · BITCOIN',W*.5,174); 
+    if(Math.floor(frm/28)%2===0){ 
+      X.font='bold 20px Arial Black';X.fillStyle='#fff'; 
+      X.strokeText('▶  PRESS SPACE / TAP LEFT TO START  ◀',W*.5,238);X.fillText('▶  PRESS SPACE / TAP LEFT TO START  ◀',W*.5,238); 
+    } 
+    X.font='14px Arial';X.fillStyle='#8878aa';X.fillText('SPACE / ↑ = JUMP (double jump!)  ·  Z, X, ↓ = DUCK under flying rugs',W*.5,278);X.fillText('🟩 GREEN CANDLE = 5s INVINCIBLE  |  ⚡ WAND = 5x COINS 5s',W*.5,300); 
+  }
+  
+  if(ST==='gameover_input' || ST==='gameover_leaderboard'){
+    X.fillStyle='rgba(3,1,16,.88)';X.fillRect(0,0,W,H); 
+    X.shadowColor='#ff4040';X.shadowBlur=22; 
+    X.font='bold 60px Arial Black';X.textAlign='center';X.textBaseline='alphabetic'; 
+    X.strokeText('RUG PULLED! 💀',W*.5,145);X.fillStyle='#ff3030';X.fillText('RUG PULLED! 💀',W*.5,145);X.shadowBlur=0; 
+    
+    X.font='bold 29px Arial';X.fillStyle='#f0c040'; 
+    X.strokeText(`$MIM EARNED: ${score}`,W*.5,196);X.fillText(`$MIM EARNED: ${score}`,W*.5,196); 
+    
+    if(score>0&&score===best){ 
+      X.fillStyle='#90ff40';X.font='bold 21px Arial';X.fillText('✨ NEW HIGH SCORE! ✨',W*.5,234); 
+    } else { 
+      X.fillStyle='#aaa';X.font='20px Arial';X.fillText(`Best: ${best}`,W*.5,234); 
+    } 
+
+    if (ST === 'gameover_leaderboard') {
+      drawLeaderboard();
+      if(Math.floor(frm/28)%2===0){ 
+        X.font='bold 18px Arial Black';X.fillStyle='#fff'; 
+        X.textAlign = 'center';
+        X.strokeText('▶ SPACE / TAP TO RESTART ◀',W*.5,405);
+        X.fillText('▶ SPACE / TAP TO RESTART ◀',W*.5,405); 
+      }
+    }
   }
 }
 
