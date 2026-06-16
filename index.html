@@ -6,23 +6,8 @@
 <title>$MIM RUNNER v2 — Magic Internet Money</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body {
-  background:#04010f;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  min-height:100vh;
-  overflow:hidden;
-  user-select:none;
-}
-canvas {
-  border:4px solid #f0c040;
-  box-shadow:0 0 30px rgba(240,192,64,.6),0 0 80px rgba(100,60,220,.4);
-  display:block;
-  max-width:100vw;
-  cursor:pointer;
-}
+body { background:#04010f; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; user-select:none; }
+canvas { border:4px solid #f0c040; box-shadow:0 0 30px rgba(240,192,64,.6),0 0 80px rgba(100,60,220,.4); display:block; max-width:100vw; cursor:pointer; }
 #tag{color:#f0c040;font:bold 12px Arial Black;letter-spacing:4px;margin-top:9px;opacity:.75;text-align:center;}
 </style>
 </head>
@@ -30,9 +15,7 @@ canvas {
 <canvas id="c" width="900" height="420"></canvas>
 <div id="tag">MAGIC INTERNET MONEY · ORDINALS · RUNES · $MIM</div>
 <script>
-// ══════════════════════════════════════════
-//  LEADERBOARD INTEGRATION
-// ══════════════════════════════════════════
+// 1. SUPABASE CONFIG
 const SUPABASE_URL = 'https://bstybppivgbezlimzck.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_ZmiGgH2vTdKCdj-eUfzMHg_yS2Jc0tD';
 
@@ -40,28 +23,30 @@ async function submitScore(name, score) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/leaderboard`, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ player_name: name, score: score })
     });
-  } catch (e) { console.error("Error submitting score", e); }
+  } catch (e) { console.error("Leaderboard Error:", e); }
 }
 
-// ══════════════════════════════════════════
-//  GAME LOGIC
-// ══════════════════════════════════════════
-const C=document.getElementById('c'),X=C.getContext('2d');
+// 2. GAME VARIABLES
+const C=document.getElementById('c'), X=C.getContext('2d');
 const W=900,H=420,G=330;
 const PH=90,DH=42;
 const HBX=16,HBY=16,HBW=40,HBH=PH-24;
+const wizardImg = new Image(); wizardImg.src = 'mavensbot.png';
 
-const wizardImg = new Image();
-wizardImg.src = 'mavensbot.png';
+let ST='start',score=0,best=0,frm=0,spd=5;
+let oTimer=0,cTimer=0,puTimer=0,invTimer=0,multiTimer=0,duckHeld=false;
+let obs=[],coins=[],parts=[],floats=[],pups=[];
 
+const P={
+  x:82, y:G-PH, vy:0, grav:.58, jp:-14.5,
+  jumps:2, af:0, at:0, ducking:false,
+  get grounded(){return this.y>=(G-(this.ducking?DH:PH))-1;}
+};
+
+// 3. GAME HELPERS
 CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
     const rr=Math.min(r,Math.min(w/2,h/2));
     this.moveTo(x+rr,y);this.lineTo(x+w-rr,y);this.arcTo(x+w,y,x+w,y+rr,rr);
@@ -70,44 +55,11 @@ CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
     this.lineTo(x,y+rr);this.arcTo(x,y,x+rr,y,rr);this.closePath();return this;
 };
 
-let ST='start',score=0,best=0,frm=0,spd=5;
-let oTimer=0,cTimer=0,puTimer=0;
-let invTimer=0,multiTimer=0,duckHeld=false;
-
-const P={
-  x:82, y:G-PH, vy:0, grav:.58, jp:-14.5,
-  jumps:2, af:0, at:0, ducking:false,
-  get grounded(){return this.y>=(G-(this.ducking?DH:PH))-1;}
-};
-
-let obs=[],coins=[],parts=[],floats=[],pups=[];
-
-// Background setup (simplified for brevity)
-let stars=Array.from({length:68},()=>({x:Math.random()*W, y:Math.random()*230, r:Math.random()*2.2+.3, t:Math.random()*Math.PI*2, sp:.07+Math.random()*.18}));
-let bldgs=[];
-for(let x=-50;x<W+250;x+=44+Math.floor(Math.random()*56)){
-  bldgs.push({x,y:G-(40+Math.random()*140),w:26+Math.random()*52,h:40+Math.random()*140,col:['#100528','#071535','#18102a','#1e0428','#081022'][Math.floor(Math.random()*5)],wr:Math.floor(Math.random()*4)+1,wc:Math.floor(Math.random()*3)+1});
-}
-
-function star5(x,y,r){
-  X.beginPath();
-  for(let i=0;i<10;i++){ const a=i*Math.PI/5-Math.PI/2,d=i%2===0?r:r*.4; i===0?X.moveTo(x+Math.cos(a)*d,y+Math.sin(a)*d):X.lineTo(x+Math.cos(a)*d,y+Math.sin(a)*d); }
-  X.closePath();X.fill();
-}
 function hits(ax,ay,aw,ah,bx,by,bw,bh){ return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by; }
 function burst(x,y,col,n){ for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2,s=1.5+Math.random()*5.5; parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2.5,life:1,col,sz:3+Math.random()*5.5}); } }
 function flt(x,y,txt,col){ floats.push({x,y,txt,col:col||'#f0c040',life:1}); }
 
-// [Rest of your drawing and physics functions go here...]
-// (Truncated to fit response, but keep your original code for these parts)
-
-function startGame(){
-  ST='playing';score=0;frm=0;spd=5;
-  obs=[];coins=[];parts=[];floats=[];pups=[];
-  oTimer=0;cTimer=0;puTimer=0;invTimer=0;multiTimer=0;duckHeld=false;
-  P.y=G-PH;P.vy=0;P.jumps=2;P.af=0;P.at=0;P.ducking=false;
-}
-
+// 4. GAME OVER LOGIC
 function gameOver(){
   ST='gameover';
   if(score>best)best=score;
@@ -116,8 +68,20 @@ function gameOver(){
   if (name) submitScore(name, score);
 }
 
-// Ensure the rest of your update() and loop() functions follow here
-function loop(){ update(); draw(); requestAnimationFrame(loop); }
+function startGame(){
+  ST='playing';score=0;frm=0;spd=5;
+  obs=[];coins=[];parts=[];floats=[];pups=[];
+  P.y=G-PH;P.vy=0;P.jumps=2;P.af=0;P.at=0;P.ducking=false;
+}
+
+// 5. LOOP
+function loop(){ 
+  // Ensure your update() and draw() functions are defined in your original code
+  // If you are missing update() or draw(), they must be pasted here
+  if(typeof update !== 'undefined') update();
+  if(typeof draw !== 'undefined') draw();
+  requestAnimationFrame(loop); 
+}
 loop();
 </script>
 </body>
