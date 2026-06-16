@@ -1,10 +1,9 @@
-cat > /mnt/user-data/outputs/mim-runner.html << 'GAMEFILE'
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>$MIM RUNNER v2 — Magic Internet Money</title>
+<title>$MIM RUNNER v1 — Magic Internet Money</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -441,11 +440,17 @@ function startGame(){
   oTimer=0;cTimer=0;puTimer=0;invTimer=0;multiTimer=0;duckHeld=false;
   P.y=G-PH;P.vy=0;P.jumps=2;P.af=0;P.at=0;P.ducking=false;
 }
+
 function gameOver(){
   ST='gameover';
   if(score>best)best=score;
   burst(P.x+40,P.y+45,'#ff3030',22);
-}
+  
+  // Submit to leaderboard
+  const name = prompt("RUG PULLED! Enter your name for the leaderboard:");
+  if (name) {
+    submitScore(name, score);
+  }
 
 // ══════════════════════════════════════════
 //  SPAWN
@@ -715,6 +720,26 @@ function draw(){
 // ── MAIN LOOP ──
 function loop(){update();draw();requestAnimationFrame(loop);}
 loop();
+// ══════════════════════════════════════════
+//  LEADERBOARD INTEGRATION
+// ══════════════════════════════════════════
+const SUPABASE_URL = 'https://bstybppivgbezlimzck.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_ZmiGgH2vTdKCdj-eUfzMHg_yS2Jc0tD';
+
+async function submitScore(name, score) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/leaderboard`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ player_name: name, score: score })
+    });
+  } catch (e) { console.error("Error submitting score", e); }
+}
 </script>
 </body>
 </html>
